@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<title>Simple 3D Shooter</title>
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #111; }
+  canvas { display: block; }
+  #crosshair {
+    position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 6px; height: 6px; border-radius: 50%;
+    background: rgba(255,255,255,0.9);
+    box-shadow: 0 0 0 1px rgba(0,0,0,0.6);
+    pointer-events: none;
+  }
+  #hud {
+    position: fixed; top: 12px; left: 12px; color: #fff;
+    font-family: monospace; font-size: 14px;
+    background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius: 6px;
+    pointer-events: none; line-height: 1.5;
+  }
+  #overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
+    color: #fff; font-family: monospace;
+    display: flex; align-items: center; justify-content: center;
+    flex-direction: column; text-align: center; cursor: pointer;
+  }
+  #overlay h1 { margin: 0 0 8px; font-size: 28px; }
+  #overlay p { margin: 4px 0; opacity: 0.85; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div id="crosshair"></div>
+<div id="hud">
+  Score: <span id="score">0</span><br/>
+  Ammo: <span id="ammo">∞</span>
+</div>
+<div id="overlay">
+  <h1>Simple 3D Shooter</h1>
+  <p>WASD 이동 · 마우스로 시점 조작 · 클릭으로 발사</p>
+  <p>Shift: 달리기 · Space: 점프</p>
+  <p>(클릭해서 시작)</p>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js"
+  }
+}
+</script>
+<script type="module">
+import * as THREE from "three";
+
+// ---------- Basic setup ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x88ccee);
+scene.fog = new THREE.Fog(0x88ccee, 20, 120);
+
+const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 500);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
+renderer.shadowMap.enabled = true;
+document.body.appendChild(renderer.domElement);
+
+window.addEventListener("resize", () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+
+// ---------- Lighting ----------
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const sun = new THREE.DirectionalLight(0xffffff, 1.0);
+sun.position.set(30, 50, 20);
+sun.castShadow = true;
+sun.shadow.mapSize.set(1024, 1024);
+sun.shadow.camera.left = -60;
+sun.shadow.camera.right = 60;
+sun.shadow.camera.top = 60;
+sun.shadow.camera.bottom = -60;
+scene.add(sun);
+
+// ---------- Ground ----------
+const groundSize = 150;
+const ground = new THREE.Mesh(
+  new THREE.PlaneGeometry(groundSize, groundSize),
+  new THREE.MeshStandardMaterial({ color: 0x4a8f3c })
+);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const grid = new THREE.GridHelper(groundSize, 30, 0x226622, 0x226622);
+grid.position.y = 0.01;
+scene.add(grid);
+
+// ---------- Obstacles (also act as walls to block movement) ----------
+const obstacles = [];
+const boxMat = new THREE.MeshStandardMaterial({ color: 0xaa7744 });
+function addBox(x, z, w, h, d) {
+  const box = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), boxMat);
+  box.position.set(x, h / 2, z);
+  box.castShadow = true;
+  box.receiveShadow = true;
+  scene.add(box);
+  obstacles.push({
+    mesh: box,
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+  });
+}
+addBox(10, -10, 4, 3, 4);
+addBox(-12, -6, 3, 4, 3);
+addBox(6, 14, 5, 2.5, 5);
+addBox(-8, 16, 3, 3, 6);
+addBox(0, -20, 6, 3, 3);
+
+// Boundary walls
+const wallMat = new THREE.MeshStandardMaterial({ color: 0x666666 });
+function addWall(x, z, w, d) {
+  const h = 4;
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), wallMat);
+  wall.position.set(x, h / 2, z);
+  wall.castShadow = true;
+  wall.receiveShadow = true;
+  scene.add(wall);
+  obstacles.push({
+    mesh: wall,
+    minX: x - w / 2, maxX: x + w / 2,
+    minZ: z - d / 2, maxZ: z + d / 2,
+  });
+}
+const half = groundSize / 2;
+addWall(0, -half, groundSize, 1);
+addWall(0, half, groundSize, 1);
+addWall(-half, 0, 1, groundSize);
+addWall(half, 0, 1, groundSize);
+
+// ---------- Targets ----------
+const targets = [];
+const targetGeo = new THREE.SphereGeometry(0.8, 16, 16);
+function spawnTarget() {
+  const mat = new THREE.MeshStandardMaterial({ color: 0xff3333 });
+  const mesh = new THREE.Mesh(targetGeo, mat);
+  const margin = 15;
+  let x, z;
+  do {
+    x = (Math.random() - 0.5) * (groundSize - margin * 2);
+    z = (Math.random() - 0.5) * (groundSize - margin * 2);
+  } while (Math.hypot(x, z) < 6);
+  mesh.position.set(x, 1, z);
+  mesh.castShadow = true;
+  scene.add(mesh);
+  targets.push(mesh);
+}
+for (let i = 0; i < 8; i++) spawnTarget();
+
+// ---------- Player controller ----------
+const player = {
+  height: 1.7,
+  radius: 0.4,
+  velocityY: 0,
+  onGround: true,
+  position: new THREE.Vector3(0, 0, 8),
+  yaw: 0,
+  pitch: 0,
+};
+camera.position.set(player.position.x, player.height, player.position.z);
+
+const keys = {};
+window.addEventListener("keydown", (e) => (keys[e.code] = true));
+window.addEventListener("keyup", (e) => (keys[e.code] = false));
+
+const overlay = document.getElementById("overlay");
+document.body.addEventListener("click", () => {
+  if (document.pointerLockElement !== renderer.domElement) {
+    renderer.domElement.requestPointerLock();
+  } else {
+    shoot();
+  }
+});
+
+document.addEventListener("pointerlockchange", () => {
+  const locked = document.pointerLockElement === renderer.domElement;
+  overlay.classList.toggle("hidden", locked);
+});
+
+const MOUSE_SENS = 0.0022;
+document.addEventListener("mousemove", (e) => {
+  if (document.pointerLockElement !== renderer.domElement) return;
+  player.yaw -= e.movementX * MOUSE_SENS;
+  player.pitch -= e.movementY * MOUSE_SENS;
+  const limit = Math.PI / 2 - 0.05;
+  player.pitch = Math.max(-limit, Math.min(limit, player.pitch));
+});
+
+// ---------- Shooting ----------
+let score = 0;
+const scoreEl = document.getElementById("score");
+const raycaster = new THREE.Raycaster();
+
+const BULLET_SPEED = 90;
+
+// bullets share one geometry/material (identical look) to avoid per-shot allocation
+const bulletGeometry = new THREE.SphereGeometry(0.06, 6, 6);
+const bulletMaterial = new THREE.MeshBasicMaterial({ color: 0xffe066 });
+const MAX_BULLETS = 24;
+const bulletPool = [];
+for (let i = 0; i < MAX_BULLETS; i++) {
+  const mesh = new THREE.Mesh(bulletGeometry, bulletMaterial);
+  mesh.visible = false;
+  scene.add(mesh);
+
+  const trailPositions = new Float32Array(6);
+  const trailGeo = new THREE.BufferGeometry();
+  trailGeo.setAttribute("position", new THREE.BufferAttribute(trailPositions, 3).setUsage(THREE.DynamicDrawUsage));
+  const trailMat = new THREE.LineBasicMaterial({ color: 0xffe066, transparent: true, opacity: 0.9 });
+  const trail = new THREE.Line(trailGeo, trailMat);
+  trail.visible = false;
+  trail.frustumCulled = false;
+  scene.add(trail);
+
+  bulletPool.push({
+    mesh, trail, trailPositions,
+    start: new THREE.Vector3(), end: new THREE.Vector3(),
+    dist: 1, traveled: 0, hitTarget: null, active: false, done: false, fade: 0,
+  });
+}
+let bulletCursor = 0;
+const tmpBulletPos = new THREE.Vector3();
+
+function shoot() {
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  raycaster.set(camera.position, dir);
+
+  const hits = raycaster.intersectObjects(targets, false);
+  const start = camera.position.clone();
+  let end = start.clone().add(dir.multiplyScalar(150));
+  let hitTarget = null;
+  if (hits.length > 0) {
+    end = hits[0].point.clone();
+    hitTarget = hits[0].object;
+  }
+
+  const b = bulletPool[bulletCursor];
+  bulletCursor = (bulletCursor + 1) % bulletPool.length;
+
+  b.start.copy(start);
+  b.end.copy(end);
+  b.dist = Math.max(start.distanceTo(end), 0.001);
+  b.traveled = 0;
+  b.hitTarget = hitTarget;
+  b.active = true;
+  b.done = false;
+  b.fade = 0;
+  b.mesh.position.copy(start);
+  b.mesh.visible = true;
+  b.trail.visible = true;
+  b.trail.material.opacity = 0.9;
+  const p = b.trailPositions;
+  p[0] = start.x; p[1] = start.y; p[2] = start.z;
+  p[3] = start.x; p[4] = start.y; p[5] = start.z;
+  b.trail.geometry.attributes.position.needsUpdate = true;
+}
+
+// ---------- Paint splash on hit (pooled particles, no per-hit allocation) ----------
+const PAINT_COLORS = [0xff3355, 0x33aaff, 0xffee33, 0x33ff88, 0xff33ee, 0xff8800];
+const particleGeometry = new THREE.SphereGeometry(1, 6, 6); // unit sphere, sized via mesh.scale
+const MAX_PARTICLES = 90;
+const particlePool = [];
+for (let i = 0; i < MAX_PARTICLES; i++) {
+  const mat = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0 });
+  const mesh = new THREE.Mesh(particleGeometry, mat);
+  mesh.visible = false;
+  scene.add(mesh);
+  particlePool.push({
+    mesh, mat, vel: new THREE.Vector3(),
+    life: 0, age: 0, baseScale: 1, isFlash: false, active: false,
+  });
+}
+let particleCursor = 0;
+
+function spawnParticle(point, color, vel, life, baseScale, isFlash) {
+  const p = particlePool[particleCursor];
+  particleCursor = (particleCursor + 1) % particlePool.length;
+  p.mesh.position.copy(point);
+  p.mesh.scale.setScalar(baseScale);
+  p.mat.color.setHex(color);
+  p.mat.opacity = isFlash ? 0.6 : 1;
+  p.mesh.visible = true;
+  p.vel.copy(vel);
+  p.life = life;
+  p.age = 0;
+  p.baseScale = baseScale;
+  p.isFlash = isFlash;
+  p.active = true;
+}
+
+const ZERO_VEC = new THREE.Vector3();
+
+function paintSplash(point, baseColor) {
+  const count = 12;
+  for (let i = 0; i < count; i++) {
+    const color = Math.random() < 0.5 ? baseColor : PAINT_COLORS[Math.floor(Math.random() * PAINT_COLORS.length)];
+    const theta = Math.random() * Math.PI * 2;
+    const phi = Math.random() * Math.PI;
+    const speed = 2 + Math.random() * 3.5;
+    const vel = new THREE.Vector3(
+      Math.sin(phi) * Math.cos(theta),
+      Math.cos(phi) * 0.7 + 0.6,
+      Math.sin(phi) * Math.sin(theta)
+    ).multiplyScalar(speed);
+    spawnParticle(point, color, vel, 0.5 + Math.random() * 0.35, 0.05 + Math.random() * 0.06, false);
+  }
+  spawnParticle(point, baseColor, ZERO_VEC, 0.22, 0.25, true);
+}
+
+// ---------- Movement / collision ----------
+const MOVE_SPEED = 6;
+const RUN_MULT = 1.7;
+const JUMP_SPEED = 6.5;
+const GRAVITY = 18;
+
+function resolveCollision(pos) {
+  for (const ob of obstacles) {
+    const closestX = Math.max(ob.minX, Math.min(pos.x, ob.maxX));
+    const closestZ = Math.max(ob.minZ, Math.min(pos.z, ob.maxZ));
+    const dx = pos.x - closestX;
+    const dz = pos.z - closestZ;
+    const distSq = dx * dx + dz * dz;
+    const r = player.radius;
+    if (distSq < r * r) {
+      const dist = Math.sqrt(distSq) || 0.0001;
+      const overlap = r - dist;
+      pos.x += (dx / dist) * overlap;
+      pos.z += (dz / dist) * overlap;
+    }
+  }
+  return pos;
+}
+
+const clock = new THREE.Clock();
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+
+  // camera orientation
+  camera.rotation.order = "YXZ";
+  camera.rotation.y = player.yaw;
+  camera.rotation.x = player.pitch;
+
+  // movement input relative to yaw (W = forward, S = backward)
+  let forward = 0, right = 0;
+  if (keys["KeyW"]) forward += 1;
+  if (keys["KeyS"]) forward -= 1;
+  if (keys["KeyA"]) right -= 1;
+  if (keys["KeyD"]) right += 1;
+
+  if (forward !== 0 || right !== 0) {
+    const len = Math.hypot(forward, right);
+    forward /= len; right /= len;
+    const sin = Math.sin(player.yaw), cos = Math.cos(player.yaw);
+    const worldX = right * cos - forward * sin;
+    const worldZ = -right * sin - forward * cos;
+    const speed = MOVE_SPEED * (keys["ShiftLeft"] || keys["ShiftRight"] ? RUN_MULT : 1);
+    player.position.x += worldX * speed * dt;
+    player.position.z += worldZ * speed * dt;
+  }
+
+  resolveCollision(player.position);
+
+  // boundary clamp
+  const b = groundSize / 2 - 1;
+  player.position.x = Math.max(-b, Math.min(b, player.position.x));
+  player.position.z = Math.max(-b, Math.min(b, player.position.z));
+
+  // jump / gravity
+  if (keys["Space"] && player.onGround) {
+    player.velocityY = JUMP_SPEED;
+    player.onGround = false;
+  }
+  player.velocityY -= GRAVITY * dt;
+  player.position.y += player.velocityY * dt;
+  if (player.position.y <= 0) {
+    player.position.y = 0;
+    player.velocityY = 0;
+    player.onGround = true;
+  }
+
+  camera.position.set(player.position.x, player.position.y + player.height, player.position.z);
+
+  // bullets: travel from muzzle to impact point, drawing a trail (pooled, in-place updates)
+  for (const b of bulletPool) {
+    if (!b.active) continue;
+    if (!b.done) {
+      b.traveled += BULLET_SPEED * dt;
+      const t = Math.min(b.traveled / b.dist, 1);
+      tmpBulletPos.copy(b.start).lerp(b.end, t);
+      b.mesh.position.copy(tmpBulletPos);
+      const p = b.trailPositions;
+      p[3] = tmpBulletPos.x; p[4] = tmpBulletPos.y; p[5] = tmpBulletPos.z;
+      b.trail.geometry.attributes.position.needsUpdate = true;
+
+      if (t >= 1) {
+        b.done = true;
+        b.mesh.visible = false;
+        if (b.hitTarget && targets.includes(b.hitTarget)) {
+          paintSplash(b.end, b.hitTarget.material.color.getHex());
+          scene.remove(b.hitTarget);
+          targets.splice(targets.indexOf(b.hitTarget), 1);
+          score += 1;
+          scoreEl.textContent = String(score);
+          spawnTarget();
+        }
+      }
+    } else {
+      b.fade += dt;
+      b.trail.material.opacity = Math.max(0, 0.9 * (1 - b.fade / 0.15));
+      if (b.fade >= 0.15) {
+        b.trail.visible = false;
+        b.active = false;
+      }
+    }
+  }
+
+  // paint particles: burst outward, fall with gravity, fade out (pooled)
+  for (const p of particlePool) {
+    if (!p.active) continue;
+    p.age += dt;
+    if (p.isFlash) {
+      p.mesh.scale.setScalar(p.baseScale * (1 + 6 * p.age));
+      p.mat.opacity = Math.max(0, 0.6 * (1 - p.age / p.life));
+    } else {
+      p.vel.y -= 9 * dt;
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.mat.opacity = Math.max(0, 1 - p.age / p.life);
+      p.mesh.scale.setScalar(p.baseScale * Math.max(0.001, 1 - p.age / p.life));
+    }
+    if (p.age >= p.life) {
+      p.mesh.visible = false;
+      p.active = false;
+    }
+  }
+
+  // gentle bob on targets
+  const time = performance.now() * 0.002;
+  for (const tgt of targets) {
+    tgt.position.y = 1 + Math.sin(time + tgt.id) * 0.15;
+    tgt.rotation.y += dt;
+  }
+
+  renderer.render(scene, camera);
+}
+animate();
+</script>
+</body>
+</html>

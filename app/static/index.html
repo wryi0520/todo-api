@@ -1,0 +1,451 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>Todo List</title>
+<style>
+  body {
+    font-family: system-ui, sans-serif;
+    max-width: 640px;
+    margin: 2rem auto;
+    padding: 0 1rem;
+    background-color: #f5f0e6;
+    color: #3a332b;
+  }
+  h1 { font-size: 1.4rem; }
+  form.create {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+    background: #ede4d3;
+    border: 1px solid #ddceb0;
+    border-radius: 8px;
+    padding: 0.75rem;
+  }
+  form.create .row { display: flex; gap: 0.5rem; align-items: center; }
+  form.create input[type="text"],
+  form.create input[type="datetime-local"],
+  form.create textarea {
+    flex: 1;
+    padding: 0.4rem;
+    border: 1px solid #ddceb0;
+    border-radius: 4px;
+    background: #fffdf8;
+    font-family: inherit;
+  }
+  form.create textarea { resize: vertical; min-height: 2.5rem; }
+  button {
+    cursor: pointer;
+    border: 1px solid #ddceb0;
+    border-radius: 4px;
+    background: #e4d7bc;
+    padding: 0.4rem 0.8rem;
+  }
+  button:hover { background: #d8c8a4; }
+  #trash {
+    position: relative;
+    font-size: 1.3rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 6px;
+    border: 1px dashed #c9b790;
+    background: #ede4d3;
+    transition: background 0.15s, transform 0.15s;
+    cursor: pointer;
+  }
+  #trash.drag-over {
+    background: #e3b7a8;
+    transform: scale(1.1);
+  }
+  #trash .badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    background: #b0402e;
+    color: #fff;
+    font-size: 0.65rem;
+    line-height: 1;
+    padding: 0.15rem 0.35rem;
+    border-radius: 999px;
+  }
+  .modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(58, 51, 43, 0.45);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .modal-overlay.hidden { display: none; }
+  .modal {
+    background: #f5f0e6;
+    border: 1px solid #ddceb0;
+    border-radius: 10px;
+    padding: 1rem;
+    width: 100%;
+    max-width: 480px;
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+  }
+  .modal-header { display: flex; align-items: center; justify-content: space-between; }
+  .modal-header h2 { margin: 0; font-size: 1.1rem; }
+  #trash-list { list-style: none; padding: 0; margin: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 0.5rem; }
+  #trash-list li {
+    cursor: default;
+    flex-direction: row;
+    align-items: center;
+  }
+  #trash-list .title { flex: 1; }
+  #trash-empty { color: #7a7062; font-size: 0.9rem; }
+  ul { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  li {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.7rem 0.8rem;
+    background: #fbf7ee;
+    border: 1px solid #ddceb0;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+    cursor: grab;
+  }
+  li.dragging { opacity: 0.4; cursor: grabbing; }
+  li .main-row { display: flex; align-items: center; gap: 0.5rem; }
+  li .title { flex: 1; font-weight: 600; }
+  li .meta { font-size: 0.8rem; color: #7a7062; padding-left: 1.6rem; }
+  li .description { font-size: 0.9rem; color: #5a5145; padding-left: 1.6rem; white-space: pre-wrap; }
+  li.completed .title { text-decoration: line-through; color: #948a7c; }
+  li .edit-form { display: flex; flex-direction: column; gap: 0.4rem; }
+  li .edit-form .row { display: flex; gap: 0.5rem; }
+  li .edit-form input, li .edit-form textarea {
+    flex: 1;
+    padding: 0.3rem;
+    border: 1px solid #ddceb0;
+    border-radius: 4px;
+    background: #fffdf8;
+    font-family: inherit;
+  }
+  #error { color: #b00020; margin-bottom: 1rem; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<h1>Todo List</h1>
+<div id="error"></div>
+<form id="create-form" class="create">
+  <div class="row">
+    <input type="text" id="title" placeholder="새 할 일" required>
+    <input type="datetime-local" id="due-date">
+    <span id="trash" title="끌어다 놓으면 휴지통으로, 클릭하면 휴지통 열기">
+      🗑️<span class="badge hidden" id="trash-count">0</span>
+    </span>
+  </div>
+  <textarea id="description" placeholder="설명 (선택)"></textarea>
+  <button type="submit">추가</button>
+</form>
+<ul id="todo-list"></ul>
+
+<div id="trash-modal" class="modal-overlay hidden">
+  <div class="modal">
+    <div class="modal-header">
+      <h2>휴지통</h2>
+      <button id="close-trash" type="button">닫기</button>
+    </div>
+    <div id="trash-empty" class="hidden">휴지통이 비어 있습니다.</div>
+    <ul id="trash-list"></ul>
+  </div>
+</div>
+
+<script>
+const API = "/todos";
+const listEl = document.getElementById("todo-list");
+const errorEl = document.getElementById("error");
+let editingId = null;
+let allTodos = [];
+
+const TRASH_STORAGE_KEY = "trashedTodoIds";
+const trashedIds = new Set(JSON.parse(localStorage.getItem(TRASH_STORAGE_KEY) || "[]"));
+
+function saveTrashedIds() {
+  localStorage.setItem(TRASH_STORAGE_KEY, JSON.stringify([...trashedIds]));
+}
+
+function showError(message) {
+  errorEl.textContent = message || "";
+}
+
+function formatDueDate(dueDate) {
+  if (!dueDate) return "";
+  const d = new Date(dueDate);
+  if (isNaN(d.getTime())) return dueDate;
+  return d.toLocaleString();
+}
+
+async function fetchTodos() {
+  showError("");
+  try {
+    const res = await fetch(API);
+    if (!res.ok) throw new Error(`목록을 불러오지 못했습니다 (${res.status})`);
+    allTodos = await res.json();
+    renderTodos(allTodos.filter((todo) => !trashedIds.has(todo.id)));
+    renderTrashCount();
+    if (!trashModalEl.classList.contains("hidden")) renderTrashList();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+function renderTrashCount() {
+  const count = allTodos.filter((todo) => trashedIds.has(todo.id)).length;
+  trashCountEl.textContent = String(count);
+  trashCountEl.classList.toggle("hidden", count === 0);
+}
+
+function renderTodos(todos) {
+  listEl.innerHTML = "";
+  for (const todo of todos) {
+    listEl.appendChild(todo.id === editingId ? renderEditForm(todo) : renderTodoItem(todo));
+  }
+}
+
+function renderTodoItem(todo) {
+  const li = document.createElement("li");
+  li.className = todo.completed ? "completed" : "";
+  li.draggable = true;
+  li.addEventListener("dragstart", (e) => {
+    e.dataTransfer.setData("text/plain", String(todo.id));
+    e.dataTransfer.effectAllowed = "move";
+    li.classList.add("dragging");
+  });
+  li.addEventListener("dragend", () => li.classList.remove("dragging"));
+
+  const mainRow = document.createElement("div");
+  mainRow.className = "main-row";
+
+  const checkbox = document.createElement("input");
+  checkbox.type = "checkbox";
+  checkbox.checked = todo.completed;
+  checkbox.addEventListener("change", () => toggleTodo(todo.id, checkbox.checked));
+
+  const title = document.createElement("span");
+  title.className = "title";
+  title.textContent = todo.title;
+
+  const editBtn = document.createElement("button");
+  editBtn.textContent = "수정";
+  editBtn.addEventListener("click", () => {
+    editingId = todo.id;
+    fetchTodos();
+  });
+
+  mainRow.append(checkbox, title, editBtn);
+  li.appendChild(mainRow);
+
+  if (todo.due_date) {
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    meta.textContent = `마감: ${formatDueDate(todo.due_date)}`;
+    li.appendChild(meta);
+  }
+
+  if (todo.description) {
+    const description = document.createElement("div");
+    description.className = "description";
+    description.textContent = todo.description;
+    li.appendChild(description);
+  }
+
+  return li;
+}
+
+function renderEditForm(todo) {
+  const li = document.createElement("li");
+  const form = document.createElement("div");
+  form.className = "edit-form";
+
+  const row = document.createElement("div");
+  row.className = "row";
+
+  const titleInput = document.createElement("input");
+  titleInput.type = "text";
+  titleInput.value = todo.title;
+
+  const dueInput = document.createElement("input");
+  dueInput.type = "datetime-local";
+  dueInput.value = todo.due_date ? todo.due_date.slice(0, 16) : "";
+
+  row.append(titleInput, dueInput);
+
+  const descInput = document.createElement("textarea");
+  descInput.value = todo.description || "";
+  descInput.placeholder = "설명 (선택)";
+
+  const btnRow = document.createElement("div");
+  btnRow.className = "row";
+
+  const saveBtn = document.createElement("button");
+  saveBtn.textContent = "저장";
+  saveBtn.addEventListener("click", () => {
+    editingId = null;
+    updateTodo(todo.id, {
+      title: titleInput.value.trim() || todo.title,
+      description: descInput.value,
+      due_date: dueInput.value || null,
+    });
+  });
+
+  const cancelBtn = document.createElement("button");
+  cancelBtn.textContent = "취소";
+  cancelBtn.addEventListener("click", () => {
+    editingId = null;
+    fetchTodos();
+  });
+
+  btnRow.append(saveBtn, cancelBtn);
+  form.append(row, descInput, btnRow);
+  li.appendChild(form);
+  return li;
+}
+
+async function createTodo(payload) {
+  showError("");
+  try {
+    const res = await fetch(API, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`추가에 실패했습니다 (${res.status})`);
+    await fetchTodos();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function updateTodo(id, payload) {
+  showError("");
+  try {
+    const res = await fetch(`${API}/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`업데이트에 실패했습니다 (${res.status})`);
+    await fetchTodos();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+async function toggleTodo(id, completed) {
+  await updateTodo(id, { completed });
+}
+
+async function deleteTodo(id) {
+  showError("");
+  try {
+    const res = await fetch(`${API}/${id}`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`삭제에 실패했습니다 (${res.status})`);
+    await fetchTodos();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
+document.getElementById("create-form").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const titleInput = document.getElementById("title");
+  const dueInput = document.getElementById("due-date");
+  const descInput = document.getElementById("description");
+  const title = titleInput.value.trim();
+  if (!title) return;
+
+  const payload = { title };
+  if (descInput.value.trim()) payload.description = descInput.value.trim();
+  if (dueInput.value) payload.due_date = dueInput.value;
+
+  titleInput.value = "";
+  dueInput.value = "";
+  descInput.value = "";
+  createTodo(payload);
+});
+
+const trashEl = document.getElementById("trash");
+const trashCountEl = document.getElementById("trash-count");
+const trashModalEl = document.getElementById("trash-modal");
+const trashListEl = document.getElementById("trash-list");
+const trashEmptyEl = document.getElementById("trash-empty");
+
+trashEl.addEventListener("dragover", (e) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  trashEl.classList.add("drag-over");
+});
+trashEl.addEventListener("dragleave", () => trashEl.classList.remove("drag-over"));
+trashEl.addEventListener("drop", (e) => {
+  e.preventDefault();
+  trashEl.classList.remove("drag-over");
+  const id = e.dataTransfer.getData("text/plain");
+  if (!id) return;
+  trashedIds.add(Number(id));
+  saveTrashedIds();
+  if (editingId === Number(id)) editingId = null;
+  fetchTodos();
+});
+trashEl.addEventListener("click", openTrashModal);
+document.getElementById("close-trash").addEventListener("click", closeTrashModal);
+trashModalEl.addEventListener("click", (e) => {
+  if (e.target === trashModalEl) closeTrashModal();
+});
+
+function openTrashModal() {
+  renderTrashList();
+  trashModalEl.classList.remove("hidden");
+}
+
+function closeTrashModal() {
+  trashModalEl.classList.add("hidden");
+}
+
+function renderTrashList() {
+  const trashedTodos = allTodos.filter((todo) => trashedIds.has(todo.id));
+  trashListEl.innerHTML = "";
+  trashEmptyEl.classList.toggle("hidden", trashedTodos.length > 0);
+
+  for (const todo of trashedTodos) {
+    const li = document.createElement("li");
+
+    const title = document.createElement("span");
+    title.className = "title";
+    title.textContent = todo.title;
+
+    const restoreBtn = document.createElement("button");
+    restoreBtn.textContent = "복구";
+    restoreBtn.addEventListener("click", () => {
+      trashedIds.delete(todo.id);
+      saveTrashedIds();
+      renderTrashList();
+      fetchTodos();
+    });
+
+    const deleteBtn = document.createElement("button");
+    deleteBtn.textContent = "완전 삭제";
+    deleteBtn.addEventListener("click", async () => {
+      trashedIds.delete(todo.id);
+      saveTrashedIds();
+      await deleteTodo(todo.id);
+      renderTrashList();
+    });
+
+    li.append(title, restoreBtn, deleteBtn);
+    trashListEl.appendChild(li);
+  }
+}
+
+fetchTodos();
+</script>
+</body>
+</html>
