@@ -3,44 +3,232 @@
 <head>
 <meta charset="UTF-8" />
 <title>Simple 3D Shooter</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=Teko:wght@500;600;700&display=swap" rel="stylesheet" />
 <style>
+  :root {
+    --val-red: #ff4655;
+    --val-red-dim: #bd3944;
+    --val-dark: #0f1923;
+    --val-dark2: #1f2731;
+    --val-teal: #5ce1e6;
+    --val-white: #ece8e1;
+    --val-gray: #8b978f;
+  }
   html, body { margin: 0; padding: 0; overflow: hidden; background: #111; }
   canvas { display: block; }
+  body { font-family: 'Rajdhani', sans-serif; }
+
+  /* ---------- Crosshair ---------- */
   #crosshair {
     position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-    width: 6px; height: 6px; border-radius: 50%;
-    background: rgba(255,255,255,0.9);
-    box-shadow: 0 0 0 1px rgba(0,0,0,0.6);
+    width: 28px; height: 28px;
     pointer-events: none;
   }
-  #hud {
-    position: fixed; top: 12px; left: 12px; color: #fff;
-    font-family: monospace; font-size: 14px;
-    background: rgba(0,0,0,0.4); padding: 8px 12px; border-radius: 6px;
-    pointer-events: none; line-height: 1.5;
+  #crosshair .dot {
+    position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+    width: 3px; height: 3px; border-radius: 50%;
+    background: var(--val-teal);
+    box-shadow: 0 0 2px rgba(0,0,0,0.9);
   }
+  #crosshair .bar {
+    position: absolute; background: var(--val-teal);
+    box-shadow: 0 0 2px rgba(0,0,0,0.9);
+  }
+  #crosshair .bar.h { top: 50%; width: 8px; height: 2px; transform: translateY(-50%); }
+  #crosshair .bar.h.left { left: 0; }
+  #crosshair .bar.h.right { right: 0; }
+  #crosshair .bar.v { left: 50%; width: 2px; height: 8px; transform: translateX(-50%); }
+  #crosshair .bar.v.top { top: 0; }
+  #crosshair .bar.v.bottom { bottom: 0; }
+
+  /* ---------- Top HUD: round timer + score pips ---------- */
+  #round-hud {
+    position: fixed; top: 0; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: stretch;
+    font-family: 'Teko', sans-serif;
+    pointer-events: none;
+    filter: drop-shadow(0 2px 6px rgba(0,0,0,0.5));
+  }
+  #round-hud .side {
+    background: var(--val-dark2); color: var(--val-white);
+    display: flex; align-items: center; padding: 4px 18px;
+    font-size: 26px; font-weight: 600; letter-spacing: 1px;
+  }
+  #round-hud .side.atk { clip-path: polygon(0 0, 100% 0, 88% 100%, 0% 100%); padding-right: 26px; }
+  #round-hud .side.def { clip-path: polygon(12% 0, 100% 0, 100% 100%, 0% 100%); padding-left: 26px; }
+  #round-hud .timer {
+    background: var(--val-dark); color: var(--val-white);
+    min-width: 70px; text-align: center;
+    font-size: 30px; font-weight: 700; padding: 4px 14px;
+    border-left: 1px solid rgba(255,255,255,0.08);
+    border-right: 1px solid rgba(255,255,255,0.08);
+  }
+
+  /* ---------- Kill feed ---------- */
+  #killfeed {
+    position: fixed; top: 64px; right: 14px;
+    display: flex; flex-direction: column; align-items: flex-end; gap: 4px;
+    pointer-events: none;
+  }
+  #killfeed .entry {
+    background: rgba(15, 25, 35, 0.75); color: var(--val-white);
+    font-size: 15px; font-weight: 600; padding: 4px 10px;
+    border-right: 3px solid var(--val-red);
+    opacity: 0; transform: translateX(8px);
+    transition: opacity 0.2s ease, transform 0.2s ease;
+    white-space: nowrap;
+  }
+  #killfeed .entry.show { opacity: 1; transform: translateX(0); }
+  #killfeed .entry .name { color: var(--val-teal); }
+  #killfeed .entry .verb { color: var(--val-gray); margin: 0 4px; font-size: 12px; }
+
+  /* ---------- Bottom-left: agent info ---------- */
+  #agent-hud {
+    position: fixed; bottom: 16px; left: 16px;
+    display: flex; align-items: center; gap: 10px;
+    pointer-events: none;
+  }
+  #agent-hud .portrait {
+    width: 46px; height: 46px; border-radius: 4px;
+    background: linear-gradient(155deg, var(--val-red), var(--val-dark2));
+    border: 2px solid var(--val-white);
+    display: flex; align-items: center; justify-content: center;
+    font-family: 'Teko', sans-serif; font-size: 22px; color: var(--val-white); font-weight: 700;
+  }
+  #agent-hud .meta { color: var(--val-white); }
+  #agent-hud .agent-name {
+    font-family: 'Teko', sans-serif; font-size: 22px; font-weight: 600; letter-spacing: 1px;
+  }
+  #agent-hud .score-line {
+    font-size: 14px; color: var(--val-gray);
+  }
+  #agent-hud .score-line #score { color: var(--val-red); font-weight: 700; }
+
+  /* ---------- Bottom-center: weapon panel ---------- */
+  #weapon-hud {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    background: rgba(15, 25, 35, 0.55); padding: 8px 20px;
+    clip-path: polygon(10px 0, 100% 0, calc(100% - 10px) 100%, 0 100%);
+    pointer-events: none;
+  }
+  #weapon-hud .icon {
+    width: 44px; height: 20px; position: relative;
+  }
+  #weapon-hud .icon svg { width: 100%; height: 100%; fill: var(--val-white); }
+  #weapon-hud .ammo-block { display: flex; flex-direction: column; align-items: flex-end; }
+  #weapon-hud .weapon-name {
+    font-family: 'Teko', sans-serif; font-size: 16px; color: var(--val-gray);
+    letter-spacing: 2px; text-transform: uppercase;
+  }
+  #weapon-hud .ammo {
+    font-family: 'Teko', sans-serif; font-size: 32px; color: var(--val-white); font-weight: 700; line-height: 1;
+  }
+
+  /* ---------- Bottom-right: ability bar ---------- */
+  #ability-hud {
+    position: fixed; bottom: 16px; right: 16px;
+    display: flex; gap: 6px;
+    pointer-events: none;
+  }
+  #ability-hud .slot {
+    width: 48px; height: 48px;
+    background: var(--val-dark2); border: 1px solid rgba(255,255,255,0.15);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    color: var(--val-white);
+  }
+  #ability-hud .slot .key {
+    font-family: 'Teko', sans-serif; font-size: 15px; font-weight: 700; color: var(--val-gray);
+  }
+  #ability-hud .slot .icon { font-size: 16px; }
+  #ability-hud .slot.ult {
+    border-color: var(--val-red);
+    background: linear-gradient(160deg, rgba(255,70,85,0.25), var(--val-dark2));
+  }
+  #ability-hud .slot.ult .key { color: var(--val-red); }
+
+  /* ---------- Start overlay ---------- */
   #overlay {
-    position: fixed; inset: 0; background: rgba(0,0,0,0.75);
-    color: #fff; font-family: monospace;
+    position: fixed; inset: 0; background: rgba(15, 25, 35, 0.92);
+    color: var(--val-white);
     display: flex; align-items: center; justify-content: center;
     flex-direction: column; text-align: center; cursor: pointer;
+    font-family: 'Rajdhani', sans-serif;
   }
-  #overlay h1 { margin: 0 0 8px; font-size: 28px; }
-  #overlay p { margin: 4px 0; opacity: 0.85; }
+  #overlay .accent-bar {
+    width: 120px; height: 4px; background: var(--val-red); margin-bottom: 18px;
+    clip-path: polygon(6% 0, 100% 0, 94% 100%, 0 100%);
+  }
+  #overlay h1 {
+    margin: 0 0 10px; font-family: 'Teko', sans-serif; font-size: 56px;
+    letter-spacing: 3px; text-transform: uppercase; font-weight: 700;
+  }
+  #overlay h1 span { color: var(--val-red); }
+  #overlay p { margin: 4px 0; opacity: 0.85; font-size: 16px; font-weight: 500; letter-spacing: 0.5px; }
+  #overlay .start-hint {
+    margin-top: 22px; color: var(--val-red); font-weight: 700;
+    letter-spacing: 2px; text-transform: uppercase; font-size: 14px;
+    animation: pulse 1.4s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   .hidden { display: none !important; }
 </style>
 </head>
 <body>
-<div id="crosshair"></div>
-<div id="hud">
-  Score: <span id="score">0</span><br/>
-  Ammo: <span id="ammo">∞</span>
+<div id="crosshair">
+  <div class="bar h left"></div>
+  <div class="bar h right"></div>
+  <div class="bar v top"></div>
+  <div class="bar v bottom"></div>
+  <div class="dot"></div>
 </div>
+
+<div id="round-hud">
+  <div class="side atk">ATK <span style="color:var(--val-red)">3</span></div>
+  <div class="timer" id="round-timer">1:40</div>
+  <div class="side def">DEF <span style="color:var(--val-teal)">2</span></div>
+</div>
+
+<div id="killfeed"></div>
+
+<div id="agent-hud">
+  <div class="portrait">J</div>
+  <div class="meta">
+    <div class="agent-name">JETT</div>
+    <div class="score-line">SCORE <span id="score">0</span></div>
+  </div>
+</div>
+
+<div id="weapon-hud">
+  <div class="icon">
+    <svg viewBox="0 0 100 24" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="9" width="60" height="6" rx="1"></rect>
+      <rect x="55" y="0" width="8" height="9"></rect>
+      <rect x="60" y="12" width="30" height="4" rx="1"></rect>
+      <rect x="12" y="15" width="6" height="9"></rect>
+    </svg>
+  </div>
+  <div class="ammo-block">
+    <div class="weapon-name">Vandal</div>
+    <div class="ammo"><span id="ammo">∞</span></div>
+  </div>
+</div>
+
+<div id="ability-hud">
+  <div class="slot"><div class="key">C</div><div class="icon">◆</div></div>
+  <div class="slot"><div class="key">Q</div><div class="icon">◈</div></div>
+  <div class="slot"><div class="key">E</div><div class="icon">▲</div></div>
+  <div class="slot ult"><div class="key">X</div><div class="icon">★</div></div>
+</div>
+
 <div id="overlay">
-  <h1>Simple 3D Shooter</h1>
+  <div class="accent-bar"></div>
+  <h1>SIMPLE <span>3D</span> SHOOTER</h1>
   <p>WASD 이동 · 마우스로 시점 조작 · 클릭으로 발사</p>
   <p>Shift: 달리기 · Space: 점프</p>
-  <p>(클릭해서 시작)</p>
+  <div class="start-hint">클릭해서 시작</div>
 </div>
 
 <script type="importmap">
@@ -197,6 +385,35 @@ document.addEventListener("mousemove", (e) => {
   const limit = Math.PI / 2 - 0.05;
   player.pitch = Math.max(-limit, Math.min(limit, player.pitch));
 });
+
+// ---------- Kill feed ----------
+const killfeedEl = document.getElementById("killfeed");
+function pushKillfeed(text) {
+  const entry = document.createElement("div");
+  entry.className = "entry";
+  entry.innerHTML = `<span class="name">YOU</span><span class="verb">eliminated</span>${text}`;
+  killfeedEl.appendChild(entry);
+  requestAnimationFrame(() => entry.classList.add("show"));
+  while (killfeedEl.children.length > 4) killfeedEl.removeChild(killfeedEl.firstChild);
+  setTimeout(() => {
+    entry.classList.remove("show");
+    setTimeout(() => entry.remove(), 250);
+  }, 2800);
+}
+
+// ---------- Round timer (cosmetic) ----------
+const timerEl = document.getElementById("round-timer");
+let roundTime = 100;
+function formatTime(t) {
+  const m = Math.floor(t / 60);
+  const s = Math.floor(t % 60);
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+setInterval(() => {
+  roundTime -= 1;
+  if (roundTime < 0) roundTime = 100;
+  timerEl.textContent = formatTime(roundTime);
+}, 1000);
 
 // ---------- Shooting ----------
 let score = 0;
@@ -416,6 +633,7 @@ function animate() {
           targets.splice(targets.indexOf(b.hitTarget), 1);
           score += 1;
           scoreEl.textContent = String(score);
+          pushKillfeed("<span class=\"name\">TARGET</span>");
           spawnTarget();
         }
       }
