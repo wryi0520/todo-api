@@ -3,4 +3,5 @@ __pycache__/
 *.pyc
 *.db
 *.log
+.env
 .claude/settings.local.json

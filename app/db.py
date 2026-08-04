@@ -1,17 +1,19 @@
-import sqlite3
+import os
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent.parent / "todo.db"
+import psycopg
+from dotenv import load_dotenv
+from psycopg.rows import dict_row
+
+load_dotenv()
+
 SCHEMA_PATH = Path(__file__).parent / "schema.sql"
 
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    return psycopg.connect(os.environ["DATABASE_URL"], row_factory=dict_row)
 
 
 def init_db():
     with get_connection() as conn:
-        conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
+        conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))

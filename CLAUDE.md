@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project status
 
-Minimal scaffolding is in place: a `.venv` (Python 3.12), `requirements.txt` (fastapi, uvicorn[standard]),
-and `app/main.py` with a single `/health` endpoint. No Todo domain code, database layer, or ORM has been
-added yet.
+FastAPI Todo API with full CRUD (`app/routers/todos.py`, `app/crud.py`). Storage was originally SQLite
+but has been migrated to **Render Postgres** (`app/db.py` uses `psycopg`, connection comes from the
+`DATABASE_URL` env var). `app/schema.sql` creates the `todos` table on startup via `init_db()`.
 
 ## Common commands
 
@@ -26,7 +26,7 @@ uvicorn app.main:app --reload --port 8000
 Build a Todo management REST API with the following constraints:
 
 * **Language/framework**: Python 3.12+ with FastAPI
-* **Storage**: SQLite (required)
+* **Storage**: SQLite (required by the original assignment; migrated to Render Postgres for deployment)
 * **Version control**: Git / GitHub
 * ORM choice, package manager, and project structure are free choices — none are mandated.
 * A Todo must include at minimum a title and a completed/done flag. Optional extras (description, due
