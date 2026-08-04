@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -28,5 +29,5 @@ class TodoOut(BaseModel):
     completed: bool
     due_date: Optional[str]
     priority: Optional[Priority]
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
