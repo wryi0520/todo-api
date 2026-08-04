@@ -6,7 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 FastAPI Todo API with full CRUD (`app/routers/todos.py`, `app/crud.py`). Storage was originally SQLite
 but has been migrated to **Render Postgres** (`app/db.py` uses `psycopg`, connection comes from the
-`DATABASE_URL` env var). `app/schema.sql` creates the `todos` table on startup via `init_db()`.
+`DATABASE_URL` env var). `app/schema.sql` creates the `users` and `todos` tables on startup via
+`init_db()`.
+
+Auth: JWT-based signup/login (`app/routers/auth.py`, `app/security.py`). Passwords are hashed with
+bcrypt; tokens are signed with `JWT_SECRET` (env var, see `.env.example`) and expire after 7 days.
+`app/deps.py:get_current_user` validates the `Authorization: Bearer <token>` header and is required on
+every `/todos` route, so todos are scoped per-user (`todos.user_id`). The static frontend
+(`app/static/index.html`) has a login/signup gate and stores the token in `localStorage`.
 
 ## Common commands
 

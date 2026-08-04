@@ -12,6 +12,8 @@ services:
         fromDatabase:
           name: todo-api-db
           property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
 
 databases:
   - name: todo-api-db

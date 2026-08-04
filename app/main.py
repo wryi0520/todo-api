@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.db import init_db
+from app.routers.auth import router as auth_router
 from app.routers.todos import router as todos_router
 
 
@@ -15,6 +16,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Todo API", lifespan=lifespan)
+app.include_router(auth_router)
 app.include_router(todos_router)
 
 

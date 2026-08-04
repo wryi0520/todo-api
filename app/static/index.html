@@ -130,10 +130,71 @@
   }
   #error { color: #b00020; margin-bottom: 1rem; }
   .hidden { display: none; }
+  #auth-section {
+    max-width: 360px;
+    margin: 4rem auto;
+    background: #ede4d3;
+    border: 1px solid #ddceb0;
+    border-radius: 8px;
+    padding: 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  #auth-section h1 { text-align: center; margin-top: 0; }
+  .auth-tabs { display: flex; gap: 0.5rem; margin-bottom: 0.5rem; }
+  .auth-tabs button {
+    flex: 1;
+    background: #e4d7bc;
+  }
+  .auth-tabs button.active { background: #c9b790; font-weight: 600; }
+  #auth-section input {
+    padding: 0.5rem;
+    border: 1px solid #ddceb0;
+    border-radius: 4px;
+    background: #fffdf8;
+    font-family: inherit;
+  }
+  #auth-error { color: #b00020; min-height: 1.2em; font-size: 0.9rem; }
+  #app-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1rem;
+  }
+  #app-header h1 { margin: 0; }
+  #logout-btn { font-size: 0.85rem; }
 </style>
 </head>
 <body>
-<h1>Todo List</h1>
+<div id="auth-section" class="hidden">
+  <h1>Todo List</h1>
+  <div class="auth-tabs">
+    <button type="button" id="tab-login" class="active">로그인</button>
+    <button type="button" id="tab-signup">회원가입</button>
+  </div>
+  <form id="login-form">
+    <input type="text" id="login-username" placeholder="아이디" required autocomplete="username">
+    <input type="password" id="login-password" placeholder="비밀번호" required autocomplete="current-password">
+    <button type="submit">로그인</button>
+  </form>
+  <form id="signup-form" class="hidden">
+    <input type="text" id="signup-username" placeholder="아이디 (3자 이상)" required autocomplete="username">
+    <input type="email" id="signup-email" placeholder="이메일" required autocomplete="email">
+    <input type="password" id="signup-password" placeholder="비밀번호 (8자 이상)" required autocomplete="new-password">
+    <button type="submit">회원가입</button>
+  </form>
+  <div id="auth-error"></div>
+</div>
+
+<div id="app-section" class="hidden">
+<div id="app-header">
+  <h1>Todo List</h1>
+  <div>
+    <span id="current-username"></span>
+    <button id="logout-btn" type="button">로그아웃</button>
+  </div>
+</div>
 <div id="error"></div>
 <form id="create-form" class="create">
   <div class="row">
@@ -158,9 +219,113 @@
     <ul id="trash-list"></ul>
   </div>
 </div>
+</div>
 
 <script>
 const API = "/todos";
+const AUTH_TOKEN_KEY = "authToken";
+const AUTH_USERNAME_KEY = "authUsername";
+
+const authSectionEl = document.getElementById("auth-section");
+const appSectionEl = document.getElementById("app-section");
+const authErrorEl = document.getElementById("auth-error");
+const currentUsernameEl = document.getElementById("current-username");
+
+function getToken() {
+  return localStorage.getItem(AUTH_TOKEN_KEY);
+}
+
+function authHeaders() {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+function showAuthError(message) {
+  authErrorEl.textContent = message || "";
+}
+
+function setActiveTab(tab) {
+  const isLogin = tab === "login";
+  document.getElementById("tab-login").classList.toggle("active", isLogin);
+  document.getElementById("tab-signup").classList.toggle("active", !isLogin);
+  document.getElementById("login-form").classList.toggle("hidden", !isLogin);
+  document.getElementById("signup-form").classList.toggle("hidden", isLogin);
+  showAuthError("");
+}
+
+document.getElementById("tab-login").addEventListener("click", () => setActiveTab("login"));
+document.getElementById("tab-signup").addEventListener("click", () => setActiveTab("signup"));
+
+document.getElementById("login-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  showAuthError("");
+  const username = document.getElementById("login-username").value.trim();
+  const password = document.getElementById("login-password").value;
+  try {
+    const res = await fetch("/auth/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `로그인에 실패했습니다 (${res.status})`);
+    }
+    const data = await res.json();
+    localStorage.setItem(AUTH_TOKEN_KEY, data.access_token);
+    localStorage.setItem(AUTH_USERNAME_KEY, username);
+    enterApp(username);
+  } catch (err) {
+    showAuthError(err.message);
+  }
+});
+
+document.getElementById("signup-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  showAuthError("");
+  const username = document.getElementById("signup-username").value.trim();
+  const email = document.getElementById("signup-email").value.trim();
+  const password = document.getElementById("signup-password").value;
+  try {
+    const res = await fetch("/auth/signup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, email, password }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `회원가입에 실패했습니다 (${res.status})`);
+    }
+    showAuthError("");
+    setActiveTab("login");
+    document.getElementById("login-username").value = username;
+    document.getElementById("signup-form").reset();
+  } catch (err) {
+    showAuthError(err.message);
+  }
+});
+
+document.getElementById("logout-btn").addEventListener("click", () => {
+  localStorage.removeItem(AUTH_TOKEN_KEY);
+  localStorage.removeItem(AUTH_USERNAME_KEY);
+  showApp(false);
+});
+
+function enterApp(username) {
+  currentUsernameEl.textContent = username;
+  showApp(true);
+  fetchTodos();
+}
+
+function showApp(loggedIn) {
+  authSectionEl.classList.toggle("hidden", loggedIn);
+  appSectionEl.classList.toggle("hidden", !loggedIn);
+  if (!loggedIn) {
+    document.getElementById("login-form").reset();
+    setActiveTab("login");
+  }
+}
+
 const listEl = document.getElementById("todo-list");
 const errorEl = document.getElementById("error");
 let editingId = null;
@@ -184,10 +349,21 @@ function formatDueDate(dueDate) {
   return d.toLocaleString();
 }
 
+function handleAuthFailure(res) {
+  if (res.status === 401) {
+    localStorage.removeItem(AUTH_TOKEN_KEY);
+    localStorage.removeItem(AUTH_USERNAME_KEY);
+    showApp(false);
+    return true;
+  }
+  return false;
+}
+
 async function fetchTodos() {
   showError("");
   try {
-    const res = await fetch(API);
+    const res = await fetch(API, { headers: authHeaders() });
+    if (handleAuthFailure(res)) return;
     if (!res.ok) throw new Error(`목록을 불러오지 못했습니다 (${res.status})`);
     allTodos = await res.json();
     renderTodos(allTodos.filter((todo) => !trashedIds.has(todo.id)));
@@ -315,9 +491,10 @@ async function createTodo(payload) {
   try {
     const res = await fetch(API, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
+    if (handleAuthFailure(res)) return;
     if (!res.ok) throw new Error(`추가에 실패했습니다 (${res.status})`);
     await fetchTodos();
   } catch (err) {
@@ -330,9 +507,10 @@ async function updateTodo(id, payload) {
   try {
     const res = await fetch(`${API}/${id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(payload),
     });
+    if (handleAuthFailure(res)) return;
     if (!res.ok) throw new Error(`업데이트에 실패했습니다 (${res.status})`);
     await fetchTodos();
   } catch (err) {
@@ -347,7 +525,8 @@ async function toggleTodo(id, completed) {
 async function deleteTodo(id) {
   showError("");
   try {
-    const res = await fetch(`${API}/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API}/${id}`, { method: "DELETE", headers: authHeaders() });
+    if (handleAuthFailure(res)) return;
     if (!res.ok) throw new Error(`삭제에 실패했습니다 (${res.status})`);
     await fetchTodos();
   } catch (err) {
@@ -445,7 +624,11 @@ function renderTrashList() {
   }
 }
 
-fetchTodos();
+if (getToken()) {
+  enterApp(localStorage.getItem(AUTH_USERNAME_KEY) || "");
+} else {
+  showApp(false);
+}
 </script>
 </body>
 </html>

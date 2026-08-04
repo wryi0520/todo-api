@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from typing import Iterator
 
 import psycopg
 from dotenv import load_dotenv
@@ -17,3 +18,11 @@ def get_connection():
 def init_db():
     with get_connection() as conn:
         conn.execute(SCHEMA_PATH.read_text(encoding="utf-8"))
+
+
+def get_db() -> Iterator[psycopg.Connection]:
+    conn = get_connection()
+    try:
+        yield conn
+    finally:
+        conn.close()
